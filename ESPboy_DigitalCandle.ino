@@ -424,15 +424,10 @@ void loop() {
   }
 
   // --- 7. МЕРЦАНИЕ ПОДСВЕТКИ ---
-  int baseDac = 3400; 
-  int windDip = abs(activeWind * 800); 
-  int flicker = (rand() % 100 < 30) ? (rand() % 600 - 300) : 0;
-  
-  int targetDac = constrain(baseDac - windDip + flicker, 500, 4095);
-  
+  int32_t windDip = abs(activeWind * 140); 
+  int32_t flicker = random(30);
+  int32_t targetDac = -windDip + flicker;
+  uint32_t currentDac = 950;
 
-  static uint16_t currentDac = 3400;
-  currentDac = (currentDac * 3 + targetDac) / 4; 
-  
-  myESPboy.mcp.writeDAC(currentDac, false);
+  myESPboy.mcp.writeDAC(currentDac + targetDac, false);
 }
