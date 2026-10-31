@@ -16,6 +16,7 @@ ESPboyInit myESPboy;
 #define FIRE_HEIGHT 128
 #define BLOCK_LINES 16 
 #define NUM_PARTICLES 25
+#define NUM_SNOWFLAKES 200
 
 #define WICK_X        64
 #define WICK_TOP_Y    98   
@@ -71,9 +72,15 @@ struct Particle {
   float x, y, vx, vy;
   int life, maxLife;
   int decay; 
-  bool isSpark; // Флаг: искра это или дым
+  bool isSpark;
 };
 Particle particles[NUM_PARTICLES];
+
+struct Snowflake {
+  float x, y, vy;
+  uint16_t color;
+};
+Snowflake snow[NUM_SNOWFLAKES];
 
 static inline void waitSPI() {
   uint32_t t = micros();
@@ -126,6 +133,47 @@ void setup() {
   if (currentPaletteIdx > 2) currentPaletteIdx = 0;
   
   for (int i = 0; i < NUM_PARTICLES; i++) particles[i].life = 0;
+  
+  // Инициализация снега с разными слоями (параллакс и цвет)
+  for (int i = 0; i < NUM_SNOWFLAKES; i++) {
+    snow[i].x = rand() % FIRE_WIDTH;
+    snow[i].y = rand() % FIRE_HEIGHT;
+    
+    int type = rand() % 100;
+    uint8_t r, g, b;
+    
+    if (type < 50) { 
+      // 50% Очень темно-фиолетовые (Самый дальний фон)
+      r = 15 + rand() % 15;
+      g = 5 + rand() % 5;
+      b = 40 + rand() % 20;
+      snow[i].vy = (rand() % 4 + 3) / 10.0; 
+    } 
+    else if (type < 80) { 
+      // 30% Темно-синие (Средний фон)
+      r = 10 + rand() % 10;
+      g = 15 + rand() % 20;
+      b = 80 + rand() % 40;
+      snow[i].vy = (rand() % 4 + 6) / 10.0; 
+    } 
+    else if (type < 95) { 
+      // 15% Тускло-голубые (Ближний фон)
+      r = 40 + rand() % 30;
+      g = 80 + rand() % 30;
+      b = 140 + rand() % 40;
+      snow[i].vy = (rand() % 4 + 9) / 10.0; 
+    } 
+    else { 
+      // 5% Светло-ледяные вместо слепяще-белых (Прямо перед экраном)
+      r = 120 + rand() % 40;
+      g = 140 + rand() % 40;
+      b = 180 + rand() % 40;
+      snow[i].vy = (rand() % 4 + 12) / 10.0; 
+    }
+    
+    snow[i].color = C16(myESPboy.tft.color565(r, g, b)); 
+  }
+
   for (int x = 0; x < FIRE_WIDTH; x++) {
     fuel[x] = 0;
     for (int y = 0; y < FIRE_HEIGHT; y++) fire[y][x] = 0;
@@ -169,6 +217,19 @@ void loop() {
   if (keys & PAD_RIGHT) activeWind = 1;
   
   lastKeys = keys;
+
+  // --- 1.5 ФИЗИКА СНЕГА ---
+  for (int i = 0; i < NUM_SNOWFLAKES; i++) {
+    snow[i].y += snow[i].vy;
+    snow[i].x += activeWind * 2.5; 
+    
+    if (snow[i].y >= FIRE_HEIGHT) {
+      snow[i].y = 0;
+      snow[i].x = rand() % FIRE_WIDTH;
+    }
+    if (snow[i].x < 0) snow[i].x += FIRE_WIDTH;
+    if (snow[i].x >= FIRE_WIDTH) snow[i].x -= FIRE_WIDTH;
+  }
 
   // --- 2. ЖАР ОТ ФИТИЛЯ ---
   for (int x = 0; x < FIRE_WIDTH; x++) {
@@ -297,7 +358,21 @@ void loop() {
       }
     }
 
-    // Отрисовка ярких частиц и дыма
+    // Отрисовка снега (только на черном фоне)
+    for (int i = 0; i < NUM_SNOWFLAKES; i++) {
+      int py = (int)snow[i].y;
+      if (py >= blockY && py < blockY + BLOCK_LINES) { 
+        int px = (int)snow[i].x;
+        if (px >= 0 && px < FIRE_WIDTH) {
+          int idx = (py - blockY) * FIRE_WIDTH + px;
+          if (blockBuffer[currentBuffer][idx] == 0) { 
+            blockBuffer[currentBuffer][idx] = snow[i].color;
+          }
+        }
+      }
+    }
+
+    // Отрисовка частиц и дыма
     for (int i = 0; i < NUM_PARTICLES; i++) {
       if (particles[i].life > 0) {
         int py = (int)particles[i].y;
@@ -348,13 +423,9 @@ void loop() {
     }
   }
 
-  // --- 7. ГЛУБОКОЕ МЕРЦАНИЕ ПОДСВЕТКИ В ЗАВИСИМОСТИ ОТ ВЕТРА ---
+  // --- 7. МЕРЦАНИЕ ПОДСВЕТКИ ---
   int baseDac = 3400; 
-  
-  // Чем сильнее дует ветер (activeWind), тем глубже просаживается напряжение DAC
   int windDip = abs(activeWind * 800); 
-  
-  // Редкое случайное микро-мерцание самого пламени
   int flicker = (rand() % 100 < 30) ? (rand() % 600 - 300) : 0;
   
   int targetDac = constrain(baseDac - windDip + flicker, 500, 4095);
